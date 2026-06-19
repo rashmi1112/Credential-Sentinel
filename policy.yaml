@@ -1,0 +1,21 @@
+# Sentinel policy as config (ADR-9). Placeholder for Phase 0; consumed from
+# Phase 1 onward. Windows, per-type rules, and retry bounds live here so the
+# behavior is tunable without code changes.
+
+# How close to expiry a credential must be before it enters the at-risk queue.
+expiry_windows:
+  tls_cert_days: 30
+  saas_token_days: 14
+  sa_key_days: 90
+
+# Per-credential-type rotation rules.
+rotation:
+  tls_cert: { strategy: stage_and_validate }
+  saas_token: { strategy: stage_and_validate }
+  sa_key: { strategy: stage_and_validate }
+
+# Bounded retries for flaky sources / staging (section 2: "what happens when something breaks").
+retries:
+  discovery_max_attempts: 3
+  staging_max_attempts: 3
+  backoff_seconds: 2
