@@ -1,18 +1,51 @@
 """FastAPI app: CORS, lifespan-managed graph + checkpointer, run router."""
 from __future__ import annotations
 
+import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    Counter,
+    Histogram,
+    generate_latest,
+)
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from .api.runs import router as runs_router
 from .core.config import ALLOWED_ORIGINS, DB_PATH, EVENTS_DB_PATH, MEMORY_DB_PATH
 from .graph.build import build_graph
 from .services import memory
 from .services.events import broker
+
+_REQUEST_COUNT = Counter(
+    "http_requests_total",
+    "Total HTTP requests",
+    ["method", "path", "status_code"],
+)
+_REQUEST_LATENCY = Histogram(
+    "http_request_duration_seconds",
+    "HTTP request latency in seconds",
+    ["method", "path"],
+)
+
+
+class _PrometheusMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        t0 = time.perf_counter()
+        response = await call_next(request)
+        _REQUEST_LATENCY.labels(method=request.method, path=request.url.path).observe(
+            time.perf_counter() - t0
+        )
+        _REQUEST_COUNT.labels(
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+        ).inc()
+        return response
 
 
 @asynccontextmanager
@@ -32,6 +65,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Unmanaged Credential Sentinel", version="0.0-skeleton", lifespan=lifespan)
 
+app.add_middleware(_PrometheusMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -42,9 +76,10 @@ app.add_middleware(
 
 app.include_router(runs_router)
 
-# Expose /metrics in Prometheus format — HTTP request counts, latency histograms,
-# and in-flight request gauges for every endpoint, automatically.
-Instrumentator().instrument(app).expose(app)
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics() -> Response:
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/health")
