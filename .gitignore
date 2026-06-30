@@ -21,6 +21,15 @@ frontend/test-results/
 frontend/playwright-report/
 frontend/.playwright/
 
+# Eval run logs (noisy console output; scorecards in results/*.{json,csv} are kept)
+evals/results/*.console.txt
+evals/results/smoke.csv
+evals/results/smoke.json
+
+# Eval personal guides (not deliverables)
+evals/LOOM_SCRIPT.md
+evals/docs/SCREENSHOTS.md
+
 # Misc
 .DS_Store
 local/

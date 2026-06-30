@@ -14,7 +14,7 @@ from typing import Any
 
 from langgraph.types import interrupt
 
-from ..core.config import TLS_MODE
+from ..core.config import EVAL_MODE, TLS_MODE
 from ..core.nebius import draft_plan, draft_report, nebius_configured
 from ..core.policy import load_policy
 from ..services import memory
@@ -28,6 +28,13 @@ from .tools.tls import check_tls_expiry
 
 async def _emit(run_id: str, type_: str, **data: Any) -> None:
     await broker.publish(run_id, {"type": type_, **data})
+
+
+async def _pace(seconds: float) -> None:
+    """Cosmetic pacing for live SSE streaming. Skipped under EVAL_MODE so the
+    latency/cost metrics reflect real node compute + LLM time, not demo pacing."""
+    if not EVAL_MODE:
+        await asyncio.sleep(seconds)
 
 
 def _labels(state: SentinelState) -> dict[str, str]:
@@ -49,9 +56,10 @@ def _cred_by_id(state: SentinelState, cred_id: str) -> dict[str, Any] | None:
 async def discover(state: SentinelState) -> dict[str, Any]:
     run_id = state["run_id"]
     await _emit(run_id, "node_update", node="discover", message="Discovering live credentials…")
-    await asyncio.sleep(0.4)
+    await _pace(0.4)
+    source_inventory = state.get("live_seed") or simdata.SIM_LIVE
     live: list[dict[str, Any]] = []
-    for src in simdata.SIM_LIVE:
+    for src in source_inventory:
         cred = dict(src)
         # The one genuinely live source: a real TLS handshake for cert endpoints.
         if cred.get("kind") == "tls_cert" and cred.get("endpoint") and TLS_MODE == "real":
@@ -79,7 +87,7 @@ async def discover(state: SentinelState) -> dict[str, Any]:
         else:
             cred.setdefault("expiry_source", "simulated")
         live.append(cred)
-        await asyncio.sleep(0.1)
+        await _pace(0.1)
     await _emit(
         run_id, "node_update", node="discover",
         message=f"Found {len(live)} live credentials in production",
@@ -90,8 +98,8 @@ async def discover(state: SentinelState) -> dict[str, Any]:
 async def list_managed(state: SentinelState) -> dict[str, Any]:
     run_id = state["run_id"]
     await _emit(run_id, "node_update", node="list_managed", message="Listing managed inventory…")
-    await asyncio.sleep(0.4)
-    managed = simdata.SIM_MANAGED
+    await _pace(0.4)
+    managed = state.get("managed_seed") or simdata.SIM_MANAGED
     await _emit(
         run_id, "node_update", node="list_managed",
         message=f"{len(managed)} credential(s) claimed by rotation services",
@@ -102,7 +110,7 @@ async def list_managed(state: SentinelState) -> dict[str, Any]:
 async def reconcile(state: SentinelState) -> dict[str, Any]:
     run_id = state["run_id"]
     await _emit(run_id, "node_update", node="reconcile", message="Reconciling coverage…")
-    await asyncio.sleep(0.3)
+    await _pace(0.3)
     managed_ids = {m["id"] for m in state.get("managed_inventory", []) if m.get("rotating")}
     labels = _labels(state)
     # store -> whether it is actively rotating that credential
@@ -123,7 +131,7 @@ async def reconcile(state: SentinelState) -> dict[str, Any]:
             run_id, "reconciliation_item",
             cred_id=cid, label=labels.get(cid, cid), routing=routing[cid],
         )
-        await asyncio.sleep(0.15)
+        await _pace(0.15)
     return {"reconciliation": routing, "status": "reconciled"}
 
 
@@ -160,7 +168,7 @@ async def assess(state: SentinelState) -> dict[str, Any]:
             safe_to_rotate=a["safe_to_rotate"], blocked_reason=a["blocked_reason"],
             expiry_source=a["expiry_source"],
         )
-        await asyncio.sleep(0.15)
+        await _pace(0.15)
         if not a["safe_to_rotate"]:
             await _emit(run_id, "escalation", cred_id=cid, stage="assess",
                         reason=a["blocked_reason"])
@@ -171,7 +179,7 @@ async def prioritize(state: SentinelState) -> dict[str, Any]:
     run_id = state["run_id"]
     await _emit(run_id, "node_update", node="prioritize",
                 message="Scoring urgency (deterministic)…")
-    await asyncio.sleep(0.2)
+    await _pace(0.2)
     assessments = dict(state.get("assessments", {}))
     scored: list[tuple[str, int]] = []
     for cid, entry in assessments.items():
@@ -184,7 +192,7 @@ async def prioritize(state: SentinelState) -> dict[str, Any]:
         scored.append((cid, u["score"]))
         await _emit(run_id, "urgency_item", cred_id=cid, label=a["label"],
                     score=u["score"], band=u["band"], breakdown=u["breakdown"])
-        await asyncio.sleep(0.1)
+        await _pace(0.1)
     scored.sort(key=lambda x: x[1], reverse=True)
     queue = [cid for cid, _ in scored]
     await _emit(run_id, "node_update", node="prioritize",
@@ -249,7 +257,7 @@ async def stage(state: SentinelState) -> dict[str, Any]:
         while attempts < max_attempts:
             attempts += 1
             await _emit(run_id, "staging_attempt", cred_id=cid, attempt=attempts, status="validating")
-            await asyncio.sleep(0.4)
+            await _pace(0.4)
             if outcome == "healthy" or (outcome == "flaky" and attempts >= 2):
                 healthy = True
                 break
@@ -296,22 +304,22 @@ async def cutover(state: SentinelState) -> dict[str, Any]:
         cred = _cred_by_id(state, cid)
         outcome = (cred or {}).get("sim_cutover_outcome", "healthy")
 
-        await asyncio.sleep(0.35)
+        await _pace(0.35)
         await _emit(run_id, "cutover_step", cred_id=cid, step="promote", status="ok")
-        await asyncio.sleep(0.35)
+        await _pace(0.35)
         await _emit(run_id, "cutover_step", cred_id=cid, step="repoint", status="ok")
-        await asyncio.sleep(0.4)
+        await _pace(0.4)
 
         if outcome == "healthy":
             await _emit(run_id, "cutover_step", cred_id=cid, step="verify", status="ok")
-            await asyncio.sleep(0.35)
+            await _pace(0.35)
             # Old credential still valid up to here; revoke only now (delayed).
             await _emit(run_id, "cutover_step", cred_id=cid, step="revoke_old", status="ok")
             results[cid] = {"status": "cutover_complete"}
             await _emit(run_id, "cutover_result", cred_id=cid, status="cutover_complete")
         else:
             await _emit(run_id, "cutover_step", cred_id=cid, step="verify", status="failed")
-            await asyncio.sleep(0.35)
+            await _pace(0.35)
             # Old credential was never revoked → roll consumers back to it.
             await _emit(run_id, "cutover_step", cred_id=cid, step="rollback", status="ok")
             results[cid] = {"status": "rolled_back", "escalated": True}

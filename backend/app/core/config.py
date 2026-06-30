@@ -46,6 +46,10 @@ ALLOWED_ORIGINS = [
 # uses the simulated not_after_days (offline/deterministic, for tests).
 TLS_MODE = os.getenv("SENTINEL_TLS_MODE", "real").lower()
 
+# Eval mode (Week 4): skip the cosmetic SSE-pacing sleeps so latency/cost metrics
+# reflect real node compute + LLM time, not demo pacing. Off by default.
+EVAL_MODE = os.getenv("SENTINEL_EVAL_MODE", "").lower() in ("1", "true", "yes")
+
 # Nebius Token Factory (unused in Phase 0; wired so later phases just work).
 NEBIUS_API_KEY = os.getenv("NEBIUS_API_KEY", "")
 NEBIUS_BASE_URL = os.getenv("NEBIUS_BASE_URL", "https://api.studio.nebius.com/v1/")

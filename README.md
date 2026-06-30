@@ -8,6 +8,14 @@ The sections below summarize the design, architecture, and run instructions.
 
 ---
 
+## Evaluation
+
+This agent ships with a full LangSmith evaluation suite — a 50-case golden dataset, code +
+LLM-as-judge evaluators, and measured baseline → improvement deltas (**composite
+`0.976 → 1.000`**, including a regression caught and fixed). See **[evals/](evals/)**.
+
+---
+
 ## Status: Phases 0–4 done (code complete)
 
 **Phase 0 (walking skeleton)** — proven plumbing:

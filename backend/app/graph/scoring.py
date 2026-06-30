@@ -6,6 +6,7 @@ difficulty, never a model judgment.
 """
 from __future__ import annotations
 
+import os
 from datetime import date, timedelta
 from typing import Any
 
@@ -16,8 +17,26 @@ def assess_credential(cred: dict[str, Any]) -> dict[str, Any]:
     """Turn a discovered credential into an assessment. Safety rule: never rotate
     a credential whose consumers cannot be fully enumerated."""
     dte = int(cred.get("not_after_days", 0))
-    consumers = list(cred.get("consumers", []))
-    complete = bool(cred.get("consumers_complete", True))
+    # Input validation (Improvement 2): a malformed consumers field (not a list of
+    # names) means we cannot enumerate consumers, so the credential is not safe to
+    # rotate — never coerce a string into a list of characters.
+    improved = os.getenv("SENTINEL_IMPROVEMENTS", "1") != "0"
+    raw_consumers = cred.get("consumers", [])
+    # Improvement 2: a malformed consumers field (not a list) can't be enumerated.
+    malformed = improved and not isinstance(raw_consumers, list)
+    if isinstance(raw_consumers, list):
+        consumers = [str(c) for c in raw_consumers]
+    elif improved:
+        consumers = []                  # malformed: don't coerce a string into chars
+    else:
+        consumers = list(raw_consumers)  # original baseline behavior
+    # Improvement 2b: a consumer "name" that is really an embedded instruction
+    # (prompt injection) is untrusted input — a real consumer is a short identifier,
+    # never a 40+ char sentence or one with control characters. Don't act on it; the
+    # credential is treated as unenumerable so it escalates to a human.
+    suspicious = improved and any(
+        len(c.strip()) > 40 or any(ord(ch) < 32 for ch in c) for c in consumers)
+    complete = bool(cred.get("consumers_complete", True)) and not malformed and not suspicious
     not_after = (date.today() + timedelta(days=dte)).isoformat()
     return {
         "cred_id": cred["id"],
@@ -31,7 +50,12 @@ def assess_credential(cred: dict[str, Any]) -> dict[str, Any]:
         "consumers_complete": complete,
         "rotation_difficulty": cred.get("rotation_difficulty", "medium"),
         "safe_to_rotate": complete,
-        "blocked_reason": None if complete else "consumers cannot be fully enumerated",
+        "blocked_reason": (
+            None if complete
+            else "consumers field is malformed (not a list)" if malformed
+            else "a consumer entry looks untrusted (possible prompt injection)" if suspicious
+            else "consumers cannot be fully enumerated"
+        ),
     }
 
 

@@ -12,6 +12,12 @@ from typing import Any, Optional, TypedDict
 class SentinelState(TypedDict, total=False):
     run_id: str
     config: dict[str, Any]
+    # Optional injected inventories (Week 4 eval). When present, discover/
+    # list_managed use these instead of the simulated globals, so a golden-dataset
+    # case can drive its own credentials through the real graph. Absent in normal
+    # runs → falls back to simdata (demo + smoke test unchanged).
+    live_seed: list[dict[str, Any]]
+    managed_seed: list[dict[str, Any]]
     live_inventory: list[dict[str, Any]]
     managed_inventory: list[dict[str, Any]]
     reconciliation: dict[str, str]  # cred_id -> DEFER | OWN_UNMANAGED | OWN_STALE | UNKNOWN
