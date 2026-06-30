@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sentinel-data
+  namespace: sentinel
+spec:
+  accessModes:
+    - ReadWriteOnce        # SQLite requires a single writer; matches replicas: 1
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: standard

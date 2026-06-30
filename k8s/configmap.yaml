@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sentinel-config
+  namespace: sentinel
+data:
+  # When using the in-cluster vLLM service instead of Nebius, override
+  # NEBIUS_BASE_URL to http://vllm-service:8000/v1/ — no code changes needed
+  # because the backend already uses an OpenAI-compatible client.
+  ALLOWED_ORIGINS: "https://sentinel.yourdomain.com"
+  NEBIUS_BASE_URL: "https://api.studio.nebius.com/v1/"
+  NEBIUS_MODEL: "meta-llama/Llama-3.3-70B-Instruct"
+  SENTINEL_TLS_MODE: "real"

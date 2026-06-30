@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sentinel-backend
+  namespace: sentinel
+  labels:
+    app: sentinel-backend
+spec:
+  # SQLite uses ReadWriteOnce PVC — must stay at 1 replica.
+  # To scale horizontally, migrate the checkpointer to PostgreSQL
+  # (LangGraph supports AsyncPostgresSaver as a drop-in replacement).
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sentinel-backend
+  strategy:
+    type: Recreate          # avoid two pods trying to write the same SQLite file
+  template:
+    metadata:
+      labels:
+        app: sentinel-backend
+    spec:
+      containers:
+        - name: backend
+          image: ghcr.io/YOUR_ORG/sentinel-backend:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: sentinel-config
+          env:
+            - name: NEBIUS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sentinel-secrets
+                  key: nebius-api-key
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: sentinel-data

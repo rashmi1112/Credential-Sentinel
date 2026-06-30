@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-inference
+  namespace: sentinel
+  labels:
+    app: vllm-inference
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-inference
+  template:
+    metadata:
+      labels:
+        app: vllm-inference
+    spec:
+      # GPU nodes require a taint toleration + nodeSelector. On GKE:
+      # kubectl create node-pool gpu-pool --accelerator=nvidia-l4,count=1
+      nodeSelector:
+        cloud.google.com/gke-accelerator: nvidia-l4
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:latest
+          args:
+            - "--model"
+            - "meta-llama/Meta-Llama-3.1-8B-Instruct"
+            - "--max-model-len"
+            - "4096"
+            # Continuous batching: vLLM batches concurrent requests automatically.
+            # --max-num-batched-tokens controls the throughput/latency tradeoff.
+            - "--max-num-batched-tokens"
+            - "8192"
+            - "--enable-chunked-prefill"
+            - "--dtype"
+            - "bfloat16"
+            - "--tensor-parallel-size"
+            - "1"
+          env:
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: sentinel-secrets
+                  key: hf-token
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+              memory: "24Gi"
+            requests:
+              nvidia.com/gpu: "1"
+              memory: "20Gi"
+              cpu: "4"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 120
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          volumeMounts:
+            - name: model-cache
+              mountPath: /root/.cache/huggingface
+      volumes:
+        - name: model-cache
+          emptyDir:
+            sizeLimit: 20Gi

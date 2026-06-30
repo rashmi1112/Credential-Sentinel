@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from .api.runs import router as runs_router
 from .core.config import ALLOWED_ORIGINS, DB_PATH, EVENTS_DB_PATH, MEMORY_DB_PATH
@@ -40,6 +41,10 @@ app.add_middleware(
 )
 
 app.include_router(runs_router)
+
+# Expose /metrics in Prometheus format — HTTP request counts, latency histograms,
+# and in-flight request gauges for every endpoint, automatically.
+Instrumentator().instrument(app).expose(app)
 
 
 @app.get("/health")

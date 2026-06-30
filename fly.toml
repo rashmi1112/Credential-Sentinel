@@ -1,0 +1,48 @@
+# Fly.io deploy for the backend (FastAPI + LangGraph).
+# Steps:
+#   1. fly auth login
+#   2. fly launch --no-deploy  (creates app, sets name below)
+#   3. fly secrets set NEBIUS_API_KEY=sk-...
+#   4. fly volumes create sentinel_data --size 2 --region ord
+#   5. fly deploy --dockerfile backend/Dockerfile
+#
+# Then deploy the frontend separately with Vercel or a second Fly app,
+# setting NEXT_PUBLIC_API=https://<your-app-name>.fly.dev at build time.
+
+app = "sentinel-api"
+primary_region = "ord"
+
+[build]
+  dockerfile = "backend/Dockerfile"
+
+[env]
+  ALLOWED_ORIGINS = "https://sentinel-ui.fly.dev,http://localhost:3000"
+  NEBIUS_BASE_URL = "https://api.studio.nebius.com/v1/"
+  NEBIUS_MODEL    = "meta-llama/Llama-3.3-70B-Instruct"
+  SENTINEL_TLS_MODE = "real"
+
+[mounts]
+  source      = "sentinel_data"
+  destination = "/app/data"
+
+[[services]]
+  internal_port = 8000
+  protocol      = "tcp"
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [services.http_checks]
+    interval = 30000
+    timeout  = 5000
+    path     = "/health"
+
+[vm]
+  cpu_kind = "shared"
+  cpus     = 1
+  memory   = "512mb"

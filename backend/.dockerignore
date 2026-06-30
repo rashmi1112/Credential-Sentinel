@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+data/
+.env
+.env.*
+*.db
+smoke_test.py
+_tls_check.py
+_verify_real_tls.py
