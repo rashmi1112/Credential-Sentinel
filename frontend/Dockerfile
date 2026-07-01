@@ -13,12 +13,13 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ARG NEXT_PUBLIC_API=http://localhost:8000
 ENV NEXT_PUBLIC_API=$NEXT_PUBLIC_API
+# Enable standalone output for Docker (not set when building for Vercel)
+ENV NEXT_OUTPUT=standalone
 RUN npm run build
 
 FROM node:20-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-# standalone output bundles only what's needed (~10× smaller image)
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public

@@ -16,7 +16,7 @@ LLM-as-judge evaluators, and measured baseline → improvement deltas (**composi
 
 ---
 
-## Status: Phases 0–4 done (code complete)
+## What was built
 
 **Phase 0 (walking skeleton)** — proven plumbing:
 - ✅ LangGraph graph with a SQLite checkpointer and **two interrupt gates**
@@ -47,8 +47,6 @@ LLM-as-judge evaluators, and measured baseline → improvement deltas (**composi
 - ✅ **Coverage drift memory (Feature B)** — each run persists a compact summary; the next run diffs against it to surface newly discovered unmanaged credentials, changed coverage, and items **stuck across cycles**. Rendered in the `DriftPanel`.
 - ✅ `report` node — a **Nebius**-written end-of-run narrative + counts (fallback when no key), shown in the `ReportPanel`
 - ✅ Cross-run memory lives in its own SQLite file (`sentinel_memory.db`); the run event log doubles as the audit trail
-
-All five build phases are code-complete. Remaining work is the **deliverables**: record the demo video, write the project Google Doc, and push to GitHub.
 
 ### TLS mode
 `discover` does a real TLS handshake by default. Set `SENTINEL_TLS_MODE=sim` to skip it (offline/deterministic — used by the tests).
@@ -125,6 +123,50 @@ npm run e2e        # playwright test (starts backend + frontend automatically)
 
 ---
 
+## Deployment and serving
+
+The backend and frontend are fully containerised. See **[DEPLOYMENT.md](DEPLOYMENT.md)** for a detailed walkthrough of every tool and the reasoning behind each choice.
+
+### Docker (local)
+
+```bash
+# Full stack (uses Nebius for LLM calls):
+docker compose up
+
+# With self-hosted vLLM inference (requires NVIDIA GPU):
+docker compose --profile vllm up
+```
+
+### Fly.io (live backend)
+
+```bash
+fly auth login
+fly apps create <your-app-name>
+fly volumes create sentinel_data --size 2 --region ord
+fly secrets set NEBIUS_API_KEY=sk-...
+fly deploy
+```
+
+The backend exposes `/health` and `/metrics` (Prometheus format). The vLLM service is OpenAI-API-compatible, so switching from Nebius to self-hosted inference is one environment variable: `NEBIUS_BASE_URL=http://vllm-service:8000/v1/`.
+
+### Kubernetes
+
+```bash
+kubectl apply -f k8s/
+```
+
+Manifests cover: namespace, configmap, PersistentVolumeClaim for SQLite, backend deployment (single replica — SQLite write constraint), frontend deployment (2 replicas), vLLM deployment on a GPU node, and an Ingress with SSE-aware proxy timeouts.
+
+### Latency benchmark
+
+```bash
+python scripts/latency_bench.py --url <inference-url> --model <model-id> --concurrency 1 4 8 16
+```
+
+Measures P50/P95/P99 at each concurrency level to surface the throughput advantage of vLLM's continuous batching over a naive single-request baseline.
+
+---
+
 ## API surface
 
 | Method + path | Purpose |
@@ -143,22 +185,43 @@ npm run e2e        # playwright test (starts backend + frontend automatically)
 ```
 backend/
   app/
-    main.py              # FastAPI app, CORS, lifespan-managed graph + checkpointer
-    api/runs.py          # the run endpoints + SSE
+    main.py              # FastAPI app, CORS, Prometheus /metrics, lifespan-managed graph
+    api/runs.py          # run endpoints + SSE
     graph/
       state.py           # SentinelState
-      build.py           # build_graph() -> compiled graph with 2 interrupts
-      nodes.py           # Phase 0 stubbed nodes
+      build.py           # build_graph() — compiled graph with 2 interrupt gates
+      nodes.py           # all phase nodes: discover → reconcile → assess → prioritize → plan → stage → cutover → report
+      scoring.py         # urgency score = f(expiry, blast radius, difficulty)
+      memory_logic.py    # coverage-drift diff across runs
+      tools/tls.py       # real TLS handshake adapter
     services/
       events.py          # per-run pub/sub + SQLite persistence for SSE replay
       runner.py          # run_segment(): drives the graph to the next gate / completion
-    core/config.py       # env + paths (Nebius wired but unused in Phase 0)
+      memory.py          # cross-run memory store (sentinel_memory.db)
+    core/
+      config.py          # env + paths
+      nebius.py          # OpenAI-compatible LLM client (plan + report nodes); deterministic fallback
+      policy.py          # policy.yaml loader (expiry windows, retry bounds)
   smoke_test.py          # headless end-to-end graph test
 frontend/
   app/page.tsx                 # dashboard
   app/runs/[runId]/page.tsx    # run detail
-  components/                  # ActivityFeed, ReconciliationTable, ApprovalGate, ui/ (shadcn)
+  components/                  # ActivityFeed, ReconciliationTable, ApprovalGate, StagingPanel,
+                               # CutoverPanel, DriftPanel, ReportPanel, ui/ (shadcn)
   lib/                         # api.ts, useRunStream.ts (SSE hook), types.ts
   e2e/walking-skeleton.spec.ts # Playwright: clicks through both gates to completion
   playwright.config.ts         # boots backend + frontend for the test
+evals/
+  golden/cases.json            # 50-case golden dataset
+  evaluators.py                # code + LLM-as-judge evaluators
+  harness.py                   # local eval runner
+  langsmith_eval.py            # LangSmith experiment runner
+  results/                     # baseline and improvement experiment outputs
+backend/Dockerfile             # production image (build context: repo root)
+frontend/Dockerfile            # multi-stage Next.js standalone image
+docker-compose.yml             # full local stack; --profile vllm adds self-hosted inference
+k8s/                           # Kubernetes manifests: namespace, backend, frontend, vLLM, ingress
+fly.toml                       # Fly.io deploy config for the backend
+scripts/latency_bench.py       # P50/P95/P99 LLM latency benchmark under concurrent load
+policy.yaml                    # expiry windows, rotation strategy, retry bounds (tunable without code changes)
 ```
