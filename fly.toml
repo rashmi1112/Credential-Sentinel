@@ -16,7 +16,7 @@ primary_region = "ord"
   dockerfile = "backend/Dockerfile"
 
 [env]
-  ALLOWED_ORIGINS = "https://sentinel-ui.fly.dev,http://localhost:3000"
+  ALLOWED_ORIGINS = "https://credential-sentinel.vercel.app,http://localhost:3000"
   NEBIUS_BASE_URL = "https://api.studio.nebius.com/v1/"
   NEBIUS_MODEL    = "meta-llama/Llama-3.3-70B-Instruct"
   SENTINEL_TLS_MODE = "real"
